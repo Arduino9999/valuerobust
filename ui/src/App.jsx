@@ -54,24 +54,52 @@ export default function App() {
     setIsCameraActive(false)
   }
 
-  const capturePhoto = () => {
+  const capturePhoto = async () => {
     const canvas = document.createElement('canvas')
     canvas.width = videoRef.current.videoWidth
     canvas.height = videoRef.current.videoHeight
     const ctx = canvas.getContext('2d')
     ctx.drawImage(videoRef.current, 0, 0)
-    const imageData = canvas.toDataURL('image/jpeg')
-    setImage(imageData)
+    const imageData = canvas.toDataURL('image/jpeg', 0.8)
+    const compressed = await compressImage(imageData)
+    setImage(compressed)
     stopCamera()
     resetAnalysis()
   }
 
-  const handleFileUpload = (e) => {
+  const compressImage = (dataUrl, maxWidth = 1024, quality = 0.8) => {
+    return new Promise((resolve) => {
+      const img = new Image()
+      img.onload = () => {
+        const canvas = document.createElement('canvas')
+        let width = img.width
+        let height = img.height
+
+        // Resize if too large
+        if (width > maxWidth) {
+          height = (height * maxWidth) / width
+          width = maxWidth
+        }
+
+        canvas.width = width
+        canvas.height = height
+        const ctx = canvas.getContext('2d')
+        ctx.drawImage(img, 0, 0, width, height)
+
+        // Compress to JPEG
+        resolve(canvas.toDataURL('image/jpeg', quality))
+      }
+      img.src = dataUrl
+    })
+  }
+
+  const handleFileUpload = async (e) => {
     const f = e.target.files?.[0]
     if (!f) return
     const r = new FileReader()
-    r.onload = ev => {
-      setImage(ev.target.result)
+    r.onload = async (ev) => {
+      const compressed = await compressImage(ev.target.result)
+      setImage(compressed)
       resetAnalysis()
     }
     r.readAsDataURL(f)
