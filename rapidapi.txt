@@ -1,0 +1,54 @@
+const http = require('https');
+
+const options = {
+	method: 'POST',
+	hostname: 'ebay-average-selling-price.p.rapidapi.com',
+	port: null,
+	path: '/findCompletedItems',
+	headers: {
+		'x-rapidapi-key': '6715effc80mshfdc35291f7e01a6p137962jsn009ca0006829',
+		'x-rapidapi-host': 'ebay-average-selling-price.p.rapidapi.com',
+		'Content-Type': 'application/json'
+	}
+};
+
+const req = http.request(options, function (res) {
+	const chunks = [];
+
+	res.on('data', function (chunk) {
+		chunks.push(chunk);
+	});
+
+	res.on('end', function () {
+		const body = Buffer.concat(chunks);
+		console.log(body.toString());
+	});
+});
+
+req.write(JSON.stringify({
+  keywords: 'iPhone',
+  excluded_keywords: 'locked cracked case box read LCD',
+  max_search_results: '240',
+  category_id: '9355',
+  remove_outliers: 'true',
+  site_id: '0',
+  aspects: [
+    {
+      name: 'Model',
+      value: 'Apple iPhone X'
+    },
+    {
+      name: 'LH_ItemCondition',
+      value: '3000'
+    },
+    {
+      name: 'Network',
+      value: 'Unlocked'
+    },
+    {
+      name: 'Storage Capacity',
+      value: '64 GB'
+    }
+  ]
+}));
+req.end();

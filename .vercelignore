@@ -1,0 +1,12 @@
+node_modules
+.env
+.env.local
+.git
+*.log
+server/logs
+ui/node_modules
+.DS_Store
+start_clean_dev.bat
+start_clean_dev - Copy.bat
+build.py
+allcode

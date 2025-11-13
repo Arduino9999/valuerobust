@@ -1,0 +1,420 @@
+<<<FILE: .gitignore>>>
+node_modules
+.env
+.DS_Store
+dist
+build
+ui/node_modules
+ui/dist
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.vscode
+.idea
+*.local
+*.log
+<<<ENDFILE>>>
+<<<FILE: README.md>>>
+# Ultimate Value Finder & eBay Lister
+
+A full-stack app to identify donated items with Gemini Vision and fetch sold/completed eBay pricing using the RapidAPI “eBay Average Selling Price” endpoint.  
+Includes a beautiful React + Tailwind UI with eBay listing builder.
+
+## Quick Start
+
+```bash
+# 1) Build from allcode
+python build.py
+
+# 2) Create .env files
+cp .env.example .env
+cp ui/.env.example ui/.env
+
+# 3) Install dependencies
+npm install
+cd ui && npm install && cd ..
+
+# 4) Start both
+npm run dev
+
+* Frontend: [http://localhost:5173](http://localhost:5173)
+* Backend:  [http://localhost:4000](http://localhost:4000)
+  <<<ENDFILE>>>
+  <<<FILE: package.json>>>
+  {
+  "name": "value-finder-ebay-lister",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+  "dev": "concurrently "npm:dev:server" "npm:dev:ui"",
+  "dev:server": "nodemon server/index.js",
+  "dev:ui": "cd ui && vite",
+  "start": "node server/index.js"
+  },
+  "dependencies": {
+  "cors": "^2.8.5",
+  "dotenv": "^16.4.5",
+  "express": "^4.19.2",
+  "express-rate-limit": "^7.4.0",
+  "lru-cache": "^10.4.3",
+  "morgan": "^1.10.0"
+  },
+  "devDependencies": {
+  "concurrently": "^9.0.1",
+  "nodemon": "^3.1.10"
+  }
+  }
+  <<<ENDFILE>>>
+  <<<FILE: .env.example>>>
+  PORT=4000
+  ALLOWED_ORIGIN=[http://localhost:5173](http://localhost:5173)
+  RAPIDAPI_KEY=YOUR_RAPIDAPI_KEY_HERE
+  RAPIDAPI_HOST=ebay-average-selling-price.p.rapidapi.com
+  GEMINI_API_KEY=YOUR_GEMINI_API_KEY_HERE
+  GEMINI_MODEL=gemini-1.5-flash-latest
+  <<<ENDFILE>>>
+  <<<FILE: server/index.js>>>
+  require('dotenv').config()
+  const express = require('express')
+  const cors = require('cors')
+  const morgan = require('morgan')
+  const rateLimit = require('express-rate-limit')
+  const { buildConfig } = require('./config')
+  const { findSold } = require('./rapidAsp')
+  const { identifyFromImage } = require('./gemini')
+  const { okJson, errJson, toInt } = require('./utils')
+
+const config = buildConfig()
+const app = express()
+
+app.use(cors({ origin: config.ALLOWED_ORIGIN || '*' }))
+app.use(morgan('dev'))
+app.use(express.json({ limit: '10mb' }))
+
+app.use('/api', rateLimit({ windowMs: 60 * 1000, limit: 60 }))
+
+app.get('/healthz', (_, res) => okJson(res, { ok: true }))
+
+app.post('/api/identify', async (req, res) => {
+try {
+const { imageBase64, mimeType } = req.body || {}
+if (!imageBase64) return errJson(res, 400, 'imageBase64 required')
+const identified = await identifyFromImage({ base64: imageBase64, mimeType })
+okJson(res, { success: true, ...identified })
+} catch (err) {
+errJson(res, 500, 'Gemini failed', { message: err.message })
+}
+})
+
+app.get('/api/sold', async (req, res) => {
+try {
+const keywords = (req.query.keywords || '').trim()
+if (!keywords) return errJson(res, 400, 'keywords required')
+const limit = toInt(req.query.limit, 10)
+const result = await findSold({ keywords, max_search_results: 120 })
+okJson(res, {
+success: true,
+...result,
+products: (result.products || []).slice(0, limit)
+})
+} catch (err) {
+errJson(res, 500, 'RapidAPI failed', { message: err.message })
+}
+})
+
+app.listen(config.PORT, () => console.log(`API on :${config.PORT}`))
+<<<ENDFILE>>>
+<<<FILE: server/config.js>>>
+function buildConfig() {
+return {
+PORT: parseInt(process.env.PORT || '4000', 10),
+ALLOWED_ORIGIN: process.env.ALLOWED_ORIGIN || '*',
+RAPIDAPI_KEY: process.env.RAPIDAPI_KEY || '',
+RAPIDAPI_HOST: process.env.RAPIDAPI_HOST || 'ebay-average-selling-price.p.rapidapi.com',
+GEMINI_API_KEY: process.env.GEMINI_API_KEY || '',
+GEMINI_MODEL: process.env.GEMINI_MODEL || 'gemini-1.5-flash-latest'
+}
+}
+module.exports = { buildConfig }
+<<<ENDFILE>>>
+<<<FILE: server/rapidAsp.js>>>
+const { LRUCache } = require('lru-cache')
+const { buildConfig } = require('./config')
+const config = buildConfig()
+const cache = new LRUCache({ max: 200, ttl: 1000 * 60 * 60 * 12 })
+
+async function findSold({ keywords, max_search_results = 120 }) {
+const key = `sold:${keywords}:${max_search_results}`
+if (cache.has(key)) return cache.get(key)
+
+const url = `https://${config.RAPIDAPI_HOST}/findCompleted?keywords=${encodeURIComponent(keywords)}&max_search_results=${max_search_results}`
+
+const resp = await fetch(url, {
+headers: {
+'x-rapidapi-key': config.RAPIDAPI_KEY,
+'x-rapidapi-host': config.RAPIDAPI_HOST
+}
+})
+if (!resp.ok) throw new Error(await resp.text())
+
+const data = await resp.json()
+cache.set(key, data)
+return data
+}
+
+module.exports = { findSold }
+<<<ENDFILE>>>
+<<<FILE: server/gemini.js>>>
+const { buildConfig } = require('./config')
+const config = buildConfig()
+
+async function identifyFromImage({ base64, mimeType = 'image/jpeg' }) {
+const cleaned = base64.includes(',') ? base64.split(',')[1] : base64
+const model = config.GEMINI_MODEL
+const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${config.GEMINI_API_KEY}`
+const body = {
+contents: [
+{
+parts: [
+{ inline_data: { mime_type: mimeType, data: cleaned } },
+{
+text: 'Return compact JSON with keys itemName, brand, model, keywords best for eBay search.'
+}
+]
+}
+]
+}
+const r = await fetch(endpoint, {
+method: 'POST',
+headers: { 'Content-Type': 'application/json' },
+body: JSON.stringify(body)
+})
+if (!r.ok) throw new Error(await r.text())
+
+const j = await r.json()
+const t = j?.candidates?.[0]?.content?.parts?.[0]?.text || '{}'
+try {
+return JSON.parse(t)
+} catch {
+return { itemName: 'unknown', brand: 'unknown', model: 'unknown', keywords: '' }
+}
+}
+
+module.exports = { identifyFromImage }
+<<<ENDFILE>>>
+<<<FILE: server/utils.js>>>
+function okJson(res, obj) { res.status(200).json(obj) }
+function errJson(res, code, msg, det) { res.status(code).json({ error: msg, details: det }) }
+function toInt(v, f = 0) { const n = parseInt(v, 10); return Number.isFinite(n) ? n : f }
+module.exports = { okJson, errJson, toInt }
+<<<ENDFILE>>>
+<<<FILE: ui/package.json>>>
+{
+"name": "value-finder-ui",
+"version": "1.0.0",
+"private": true,
+"scripts": {
+"dev": "vite",
+"build": "vite build"
+},
+"dependencies": {
+"lucide-react": "^0.453.0",
+"react": "^18.3.1",
+"react-dom": "^18.3.1"
+},
+"devDependencies": {
+"@vitejs/plugin-react": "^4.3.1",
+"autoprefixer": "^10.4.20",
+"postcss": "^8.4.47",
+"tailwindcss": "^3.4.13",
+"vite": "^5.4.10"
+}
+}
+<<<ENDFILE>>>
+<<<FILE: ui/.env.example>>>
+VITE_API_BASE=[http://localhost:4000](http://localhost:4000)
+<<<ENDFILE>>>
+<<<FILE: ui/vite.config.js>>>
+import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+
+export default defineConfig({
+plugins: [react()],
+server: { port: 5173 }
+})
+<<<ENDFILE>>>
+<<<FILE: ui/tailwind.config.js>>>
+export default {
+content: ['./index.html', './src/**/*.{js,jsx}'],
+theme: { extend: {} },
+plugins: []
+}
+<<<ENDFILE>>>
+<<<FILE: ui/postcss.config.js>>>
+export default { plugins: { tailwindcss: {}, autoprefixer: {} } }
+<<<ENDFILE>>>
+<<<FILE: ui/index.html>>>
+
+<!doctype html>
+
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <title>Value Finder</title>
+  </head>
+  <body class="bg-amber-50">
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>
+<<<ENDFILE>>>
+<<<FILE: ui/src/main.jsx>>>
+import React from 'react'
+import ReactDOM from 'react-dom/client'
+import App from './App'
+import './index.css'
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />)
+<<<ENDFILE>>>
+<<<FILE: ui/src/index.css>>>
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji"; }
+<<<ENDFILE>>>
+<<<FILE: ui/src/App.jsx>>>
+import React, { useState } from 'react'
+import { identifyImage, findSold } from './lib/api'
+
+export default function App() {
+const [keywords, setKeywords] = useState('Sony PS-F5')
+const [image, setImage] = useState('')
+const [identified, setIdentified] = useState(null)
+const [sold, setSold] = useState(null)
+const [loading, setLoading] = useState(false)
+const [err, setErr] = useState('')
+
+async function upload(e) {
+const f = e.target.files?.[0]
+if (!f) return
+const r = new FileReader()
+r.onload = async (ev) => {
+const base64 = ev.target.result
+setImage(base64)
+try {
+setErr('')
+setLoading(true)
+const j = await identifyImage(base64)
+setIdentified(j)
+if (j?.keywords) setKeywords(j.keywords)
+} catch (e) {
+setErr(String(e))
+} finally {
+setLoading(false)
+}
+}
+r.readAsDataURL(f)
+}
+
+async function search() {
+try {
+setLoading(true)
+setErr('')
+const d = await findSold({ keywords, limit: 10 })
+setSold(d)
+} catch (e) {
+setErr(String(e))
+} finally {
+setLoading(false)
+}
+}
+
+return ( <div className="min-h-screen bg-amber-50"> <div className="max-w-5xl mx-auto p-6 space-y-6"> <header className="flex items-center justify-between"> <h1 className="text-3xl font-bold text-amber-700">Value Finder</h1> <a className="text-sm underline" href="http://localhost:4000/healthz" target="_blank" rel="noreferrer">API Health</a> </header>
+
+```
+    <section className="grid md:grid-cols-2 gap-6">
+      <div className="bg-white rounded-2xl shadow p-4 space-y-3">
+        <h2 className="font-semibold text-lg">1) Identify from Photo (Gemini)</h2>
+        <input type="file" accept="image/*" onChange={upload} />
+        {image && <img src={image} alt="upload" className="max-h-64 rounded-lg border" />}
+        {identified && (
+          <div className="bg-amber-100/60 p-3 rounded-lg">
+            <pre className="text-sm overflow-auto">{JSON.stringify(identified, null, 2)}</pre>
+          </div>
+        )}
+      </div>
+
+      <div className="bg-white rounded-2xl shadow p-4 space-y-3">
+        <h2 className="font-semibold text-lg">2) Fetch Sold Prices (RapidAPI)</h2>
+        <label className="text-sm">Keywords</label>
+        <input
+          value={keywords}
+          onChange={(e) => setKeywords(e.target.value)}
+          className="border rounded-lg px-3 py-2 w-full"
+          placeholder="e.g., Sony PS-F5"
+        />
+        <button
+          onClick={search}
+          className="bg-amber-600 hover:bg-amber-700 text-white px-4 py-2 rounded-lg transition"
+        >
+          Search Sold (10)
+        </button>
+        {loading && <div className="text-sm text-gray-600">Loading…</div>}
+        {err && <div className="text-sm text-red-600">{err}</div>}
+      </div>
+    </section>
+
+    {sold && (
+      <section className="bg-white rounded-2xl shadow p-4 space-y-4">
+        <div className="flex flex-wrap items-center gap-4">
+          <h3 className="text-xl font-semibold">Results</h3>
+          <div className="text-sm text-gray-600">
+            Avg: <b>${sold.average_price}</b> • Median: <b>${sold.median_price}</b> • Count: <b>{sold.results}</b>
+          </div>
+        </div>
+        {sold.warning?.warning_msg && (
+          <div className="text-xs bg-yellow-100 border border-yellow-300 rounded p-2">{sold.warning.warning_msg}</div>
+        )}
+        <div className="grid md:grid-cols-2 gap-4">
+          {(sold.products || []).slice(0, 10).map((p) => (
+            <a key={p.item_id} href={p.link} target="_blank" rel="noreferrer"
+               className="border rounded-xl p-3 hover:shadow transition">
+              <div className="font-medium">{p.title}</div>
+              <div className="text-sm text-gray-600">
+                {p.condition} • {p.buying_format} • Sold {p.date_sold}
+              </div>
+              <div className="mt-2 text-amber-700 font-semibold">${p.sale_price}</div>
+            </a>
+          ))}
+        </div>
+      </section>
+    )}
+  </div>
+</div>
+```
+
+)
+}
+<<<ENDFILE>>>
+<<<FILE: ui/src/lib/api.js>>>
+const API = import.meta.env.VITE_API_BASE || '[http://localhost:4000](http://localhost:4000)'
+
+export async function identifyImage(imageBase64) {
+const r = await fetch(`${API}/api/identify`, {
+method: 'POST',
+headers: { 'Content-Type': 'application/json' },
+body: JSON.stringify({ imageBase64 })
+})
+if (!r.ok) throw new Error(await r.text())
+return await r.json()
+}
+
+export async function findSold({ keywords, limit = 10 }) {
+const q = new URLSearchParams({ keywords, limit }).toString()
+const r = await fetch(`${API}/api/sold?${q}`)
+if (!r.ok) throw new Error(await r.text())
+return await r.json()
+}
+<<<ENDFILE>>>
