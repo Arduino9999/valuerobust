@@ -1,0 +1,6 @@
+PORT=4000
+ALLOWED_ORIGIN=http://localhost:5173
+GEMINI_API_KEY=AIzaSyClU7QocjOqB96FdXVffMQvD_g9ix3l-40
+GEMINI_MODEL=gemini-2.5-flash
+RAPIDAPI_KEY=6715effc80mshfdc35291f7e01a6p137962jsn009ca0006829
+RAPIDAPI_HOST=ebay-average-selling-price.p.rapidapi.com

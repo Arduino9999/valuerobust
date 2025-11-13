@@ -119,7 +119,7 @@ export default function App() {
     resetAnalysis()
   }
 
-  // -------- Identify (Gemini only) ----------
+  // -------- Identify (OpenAI) ----------
   const runIdentify = async () => {
     if (!image) return
     setIsIdentifying(true)
@@ -137,7 +137,7 @@ export default function App() {
       if (j.brand && j.brand !== 'unknown') baseBits.push(j.brand)
       if (j.model && j.model !== 'unknown') baseBits.push(j.model)
       if (j.itemName && j.itemName !== 'unknown') baseBits.push(j.itemName)
-      // If Gemini returned a "keywords" string, tack it on
+      // If OpenAI returned a "keywords" string, tack it on
       const extras = (j.keywords || '')
         .toString()
         .replace(/\s+/g, ' ')
@@ -153,7 +153,8 @@ export default function App() {
       setHasStagedQuery(true) // show the interim editor
     } catch (e) {
       console.error('Identify error:', e)
-      setError('Failed to identify the item.')
+      const errorMsg = e?.message || 'Unknown error'
+      setError(`❌ Failed to identify item: ${errorMsg}`)
     } finally {
       setIsIdentifying(false)
     }
@@ -170,7 +171,8 @@ export default function App() {
       setSold(d)
     } catch (e) {
       console.error('Search error:', e)
-      setError(typeof e?.message === 'string' ? e.message : 'Search failed.')
+      const errorMsg = e?.message || 'Unknown error'
+      setError(`❌ Search failed: ${errorMsg}`)
     } finally {
       setIsSearching(false)
     }
@@ -363,7 +365,24 @@ export default function App() {
 
         {/* Results */}
         {error && (
-          <div className="bg-red-50 text-red-800 border border-red-200 rounded-lg p-3">{error}</div>
+          <div className="bg-red-50 text-red-800 border-2 border-red-300 rounded-xl shadow-lg p-5">
+            <div className="flex items-start gap-3">
+              <span className="text-2xl">⚠️</span>
+              <div className="flex-1">
+                <h3 className="font-bold text-lg mb-2">Error</h3>
+                <p className="text-sm leading-relaxed">{error}</p>
+                <details className="mt-3 text-xs text-red-700">
+                  <summary className="cursor-pointer hover:underline">Common issues</summary>
+                  <ul className="mt-2 ml-4 list-disc space-y-1">
+                    <li>Poor internet connection or timeout</li>
+                    <li>Image file too large (should be compressed automatically)</li>
+                    <li>API key missing or invalid in Vercel environment variables</li>
+                    <li>Rate limit exceeded (60 requests per minute)</li>
+                  </ul>
+                </details>
+              </div>
+            </div>
+          </div>
         )}
 
         {sold && (
